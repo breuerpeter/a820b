@@ -1,0 +1,6 @@
+# VSCode config
+/.vscode
+
+# ROS
+/build
+/devel
