@@ -175,6 +175,8 @@ int main(int argc, char **argv)
         double ang_vel_filtered = 0;
         double ang_vel_filtered_last = 0;
         
+        double turn_radius = 0;
+        
         ////////////////////////////////////////////////////////////
 
         // loop
@@ -193,8 +195,24 @@ int main(int argc, char **argv)
             vel_odom = wheel_radius / (4 * dt) * (wheel_r - wheel_r_last + wheel_l - wheel_l_last);
             ang_vel_odom = wheel_radius / (2 * axle_track * dt) * (wheel_r - wheel_r_last - wheel_l + wheel_l_last);
 
-            vel_imu = 
+            vel_imu = vel_filtered_last + imu_lin_acc * dt;
 
+            vel_filtered = weight_odom_v * vel_odom + weight_imu_v * vel_imu;
+            ang_vel_filtered = weight_odom_w * ang_vel_odom + weight_imu_w * imu_ang_vel;
+
+            double ang_rbt_last = ang_rbt;
+            ang_rbt = ang_rbt_last + ang_vel_filtered * dt;
+
+            turn_radius = vel_filtered / ang_vel_filtered;
+
+            if (ang_vel_filtered > straight_thresh) {
+                pos_rbt.x += turn_radius * (-sin(ang_rbt_last) + sin(ang_rbt));
+                pos_rbt.y += turn_radius * (cos(ang_rbt_last) + -cos(ang_rbt));
+            }
+            else {
+                pos_rbt.x += vel_filtered * dt * cos(ang_rbt_last);
+                pos_rbt.y += vel_filtered * dt * sin(ang_rbt_last);
+            }
 
             ////////////////////////////////////////////////////////
 
