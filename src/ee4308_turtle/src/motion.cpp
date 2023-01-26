@@ -24,13 +24,24 @@ void cbWheels(const sensor_msgs::JointState::ConstPtr &msg)
     wheel_r_last = wheel_r;
 
     wheel_l = msg->position[1]; 
-    wheel_r = msg->position[0]; 
+    wheel_r = msg->position[0];
 }
 
 nav_msgs::Odometry msg_odom;
 void cbOdom(const nav_msgs::Odometry::ConstPtr &msg)
 {
     msg_odom = *msg;
+}
+
+double constrainAngle(double x){
+    x = fmod(x + M_PI, 2 * M_PI);
+    if (x < 0)
+        x += 2 * M_PI;
+    return x - M_PI;
+}
+
+double rad2deg(double rad) {
+    return rad * 180.0 / M_PI;
 }
 
 int main(int argc, char **argv)
@@ -42,6 +53,9 @@ int main(int argc, char **argv)
     bool use_internal_odom;
     if (!nh.param("use_internal_odom", use_internal_odom, true))
         ROS_WARN(" TMOVE : Param use_internal_odom not found, set to true");
+    bool tune_filter;
+    if (!nh.param("tune_filter", tune_filter, false))
+        ROS_WARN(" TMOVE : Param tune_filter not found, set to false");
     bool verbose;
     if (!nh.param("verbose_motion", verbose, false))
         ROS_WARN(" TMOVE : Param verbose_motion not found, set to false");
@@ -139,7 +153,9 @@ int main(int argc, char **argv)
         // Subscribers
         ros::Subscriber sub_wheels = nh.subscribe("joint_states", 1, &cbWheels);
         ros::Subscriber sub_imu = nh.subscribe("imu", 1, &cbImu);
-
+        ros::Subscriber sub_odom = nh.subscribe("odom", 1, &cbOdom); // only for tuning weights
+   
+        
         // initialise rate
         ros::Rate rate(motion_iter_rate); // higher rate for better estimation
 
@@ -149,7 +165,7 @@ int main(int argc, char **argv)
 
         // wait for dependent nodes to load (check topics)
         ROS_INFO("TMOTION: Waiting for topics");
-        while (ros::ok() && nh.param("run", true) && (wheel_l == 10 || wheel_r == 10 || imu_ang_vel == -10)) // dependent on imu and wheels
+        while (ros::ok() && nh.param("run", true) && (wheel_l_last == 10 || wheel_r_last == 10 || imu_ang_vel == -10)) // dependent on imu and wheels
         {
             rate.sleep();
             ros::spinOnce(); //update the topics
@@ -176,7 +192,13 @@ int main(int argc, char **argv)
         double ang_vel_filtered_last = 0;
         
         double turn_radius = 0;
-        
+
+        double ang_sim = 0;
+        double pos_error = 0;
+        double ang_error = 0;
+
+        double ang_rbt_last = ang_rbt;
+
         ////////////////////////////////////////////////////////////
 
         // loop
@@ -190,28 +212,53 @@ int main(int argc, char **argv)
                 continue;
             prev_time += dt;
 
+            if (verbose)
+            {
+                ROS_INFO("TMOTION: Pos: (%.3f, %.3f), Ang: %.3f",
+                         pos_rbt.x, pos_rbt.y, rad2deg(ang_rbt));
+                
+                /* ROS_INFO("\ndt: %.3f\nvel_odom: %.3f\nang_vel_odom: %.3f\nvel_imu: %.3f\nvel_filtered: %.3f\nvel_filtered_last: %.3f\nang_vel_filtered: %.3f",
+                         dt, vel_odom, ang_vel_odom, vel_imu, vel_filtered, vel_filtered_last, ang_vel_filtered); */
+            }
+
+            if (tune_filter)
+            {
+                ROS_INFO("TMOTION: PosTrue: (%.3f, %.3f), AngTrue: %.3f, PosErr: %.3f, AngErr: %.3f",
+                         msg_odom.pose.pose.position.x, msg_odom.pose.pose.position.y, rad2deg(ang_sim), pos_error, rad2deg(ang_error));
+            }
+
             ////////////////// MOTION FILTER HERE //////////////////
-            
+         
             vel_odom = wheel_radius / (4 * dt) * (wheel_r - wheel_r_last + wheel_l - wheel_l_last);
             ang_vel_odom = wheel_radius / (2 * axle_track * dt) * (wheel_r - wheel_r_last - wheel_l + wheel_l_last);
 
+            vel_filtered_last = vel_filtered;
+            
             vel_imu = vel_filtered_last + imu_lin_acc * dt;
 
             vel_filtered = weight_odom_v * vel_odom + weight_imu_v * vel_imu;
             ang_vel_filtered = weight_odom_w * ang_vel_odom + weight_imu_w * imu_ang_vel;
 
-            double ang_rbt_last = ang_rbt;
-            ang_rbt = ang_rbt_last + ang_vel_filtered * dt;
+            ang_rbt_last = ang_rbt;
+            ang_rbt = constrainAngle(ang_rbt_last + ang_vel_filtered * dt);
 
             turn_radius = vel_filtered / ang_vel_filtered;
 
-            if (ang_vel_filtered > straight_thresh) {
+            if (abs(ang_vel_filtered) > straight_thresh) {
                 pos_rbt.x += turn_radius * (-sin(ang_rbt_last) + sin(ang_rbt));
                 pos_rbt.y += turn_radius * (cos(ang_rbt_last) + -cos(ang_rbt));
             }
             else {
                 pos_rbt.x += vel_filtered * dt * cos(ang_rbt_last);
                 pos_rbt.y += vel_filtered * dt * sin(ang_rbt_last);
+            }
+
+            if (tune_filter) {
+                auto &q = msg_odom.pose.pose.orientation;
+                ang_sim = atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+
+                pos_error = sqrt(pow((msg_odom.pose.pose.position.x - pos_rbt.x), 2) + pow((msg_odom.pose.pose.position.y - pos_rbt.y), 2));
+                ang_error = abs(constrainAngle(ang_sim - ang_rbt));
             }
 
             ////////////////////////////////////////////////////////
@@ -224,11 +271,6 @@ int main(int argc, char **argv)
             pose_rbt.pose.orientation.z = sin(ang_rbt / 2);
             pub_pose.publish(pose_rbt);
 
-            if (verbose)
-            {
-                ROS_INFO("TMOTION: Pos(%7.3f, %7.3f)  Ang(%6.3f)",
-                         pos_rbt.x, pos_rbt.y, ang_rbt);
-            }
 
             // sleep until the end of the required frequency
             rate.sleep();
