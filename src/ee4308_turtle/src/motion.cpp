@@ -17,12 +17,8 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
 }
 
 double wheel_l = 10, wheel_r = 10; // init as 10 bcos both are unlikely to be exactly 10 (both can start at non-zero if u reset the sim). whole doubles can also be exactly compared
-double wheel_l_last = wheel_l, wheel_r_last = wheel_r;
 void cbWheels(const sensor_msgs::JointState::ConstPtr &msg)
 {
-    wheel_l_last = wheel_l;
-    wheel_r_last = wheel_r;
-
     wheel_l = msg->position[1]; 
     wheel_r = msg->position[0];
 }
@@ -31,13 +27,6 @@ nav_msgs::Odometry msg_odom;
 void cbOdom(const nav_msgs::Odometry::ConstPtr &msg)
 {
     msg_odom = *msg;
-}
-
-double constrainAngle(double x){
-    x = fmod(x + M_PI, 2 * M_PI);
-    if (x < 0)
-        x += 2 * M_PI;
-    return x - M_PI;
 }
 
 double rad2deg(double rad) {
@@ -165,7 +154,7 @@ int main(int argc, char **argv)
 
         // wait for dependent nodes to load (check topics)
         ROS_INFO("TMOTION: Waiting for topics");
-        while (ros::ok() && nh.param("run", true) && (wheel_l_last == 10 || wheel_r_last == 10 || imu_ang_vel == -10)) // dependent on imu and wheels
+        while (ros::ok() && nh.param("run", true) && (wheel_l == 10 || wheel_r == 10 || imu_ang_vel == -10)) // dependent on imu and wheels
         {
             rate.sleep();
             ros::spinOnce(); //update the topics
@@ -180,6 +169,9 @@ int main(int argc, char **argv)
         double dt = 0;
 
         ////////////////// DECLARE VARIABLES HERE //////////////////
+
+        double wheel_l_last = wheel_l;
+        double wheel_r_last = wheel_r;
 
         double vel_odom = 0;
         double ang_vel_odom = 0;
@@ -215,7 +207,7 @@ int main(int argc, char **argv)
             if (verbose)
             {
                 ROS_INFO("TMOTION: Pos: (%.3f, %.3f), Ang: %.3f",
-                         pos_rbt.x, pos_rbt.y, rad2deg(ang_rbt));
+                         pos_rbt.x, pos_rbt.y, ang_rbt);
                 
                 /* ROS_INFO("\ndt: %.3f\nvel_odom: %.3f\nang_vel_odom: %.3f\nvel_imu: %.3f\nvel_filtered: %.3f\nvel_filtered_last: %.3f\nang_vel_filtered: %.3f",
                          dt, vel_odom, ang_vel_odom, vel_imu, vel_filtered, vel_filtered_last, ang_vel_filtered); */
@@ -223,24 +215,23 @@ int main(int argc, char **argv)
 
             if (tune_filter)
             {
-                ROS_INFO("TMOTION: PosTrue: (%.3f, %.3f), AngTrue: %.3f, PosErr: %.3f, AngErr: %.3f",
-                         msg_odom.pose.pose.position.x, msg_odom.pose.pose.position.y, rad2deg(ang_sim), pos_error, rad2deg(ang_error));
+                ROS_INFO("TMOTION: PosTrue: (%.3f, %.3f), AngTrue: %.3f, PosErr: %.3f",
+                         msg_odom.pose.pose.position.x, msg_odom.pose.pose.position.y, ang_sim, pos_error);
             }
 
             ////////////////// MOTION FILTER HERE //////////////////
          
-            vel_odom = wheel_radius / (4 * dt) * (wheel_r - wheel_r_last + wheel_l - wheel_l_last);
-            ang_vel_odom = wheel_radius / (2 * axle_track * dt) * (wheel_r - wheel_r_last - wheel_l + wheel_l_last);
+            vel_odom = 2 * wheel_radius / (4 * dt) * (wheel_r - wheel_r_last + wheel_l - wheel_l_last);
+            ang_vel_odom = 2 * wheel_radius * (wheel_r - wheel_r_last - wheel_l + wheel_l_last) / (2 * axle_track * dt);
 
             vel_filtered_last = vel_filtered;
-            
             vel_imu = vel_filtered_last + imu_lin_acc * dt;
 
             vel_filtered = weight_odom_v * vel_odom + weight_imu_v * vel_imu;
             ang_vel_filtered = weight_odom_w * ang_vel_odom + weight_imu_w * imu_ang_vel;
 
             ang_rbt_last = ang_rbt;
-            ang_rbt = constrainAngle(ang_rbt_last + ang_vel_filtered * dt);
+            ang_rbt = ang_rbt_last + ang_vel_filtered * dt;
 
             turn_radius = vel_filtered / ang_vel_filtered;
 
@@ -253,12 +244,14 @@ int main(int argc, char **argv)
                 pos_rbt.y += vel_filtered * dt * sin(ang_rbt_last);
             }
 
+            wheel_l_last = wheel_l;
+            wheel_r_last = wheel_r;
+
             if (tune_filter) {
                 auto &q = msg_odom.pose.pose.orientation;
                 ang_sim = atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
 
                 pos_error = sqrt(pow((msg_odom.pose.pose.position.x - pos_rbt.x), 2) + pow((msg_odom.pose.pose.position.y - pos_rbt.y), 2));
-                ang_error = abs(constrainAngle(ang_sim - ang_rbt));
             }
 
             ////////////////////////////////////////////////////////

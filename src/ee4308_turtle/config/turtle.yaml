@@ -14,10 +14,17 @@ use_internal_odom: false
 tune_filter: true
 axle_track: 0.16
 wheel_radius: 0.033
-weight_odom_v: 0.9  # 1.0: 0.49, 0.9: 0.8, 0.8: 0.83, 0.7: 0.83, 0.6: 0.84, 0.5: 0.865, 0.4: 0.87, 0.3: 0.95, 0.2: 1.04, 0.1: 1.34 (0-0.2, 0.2-0 after 4m until 5m)
-weight_odom_w: 0.1 # 0.9: 98, 0.8: 84.5, 0.7: 75, 0.6: 64, 0.5: 54, 0.4: 40, 0.3: 23, 0.2: 21, 0.1: 11, 0.0: 0 (0-0.5, 0.5-0 after 1st rot until 2nd compl)
+weight_odom_v: 0.9
+weight_odom_w: 0.8
 straight_thresh: 0.05
 motion_iter_rate: 50
+
+# weight_odom_v tuning:
+# 1.0: 0.025, 0.9: 0.017, 0.8: 0.023, 0.7: 0.033, 0.6: 0.050, 0.5: 0.60, 0.4: 0.095, 0.3: 0.137, 0.2: 0.251, 0.1: 0.545 (0-0.2, 0.2-0 after 4m until 5m)
+
+# weight_odom_w tuning:
+# 1.0: 6.03, 0.9: 5.52, 0.8: 5.02, 0.7: 4.69, 0.6: 3.09, 0.5: 2.40, 0.4: 2.26, 0.3: 1.83, 0.2: 1.28, 0.1: 0.64 0.0: 0.01 (0-0.5, 0.5-0 after 1st rot until 2nd compl)
+# 1.0: 12.2, 0.9: 11.8, 0.8: 9.19, 0.7: 8.80, 0.6: 8.31, 0.5: 6.34, 0.4: 4.89, 0.3: 3.56, 0.2: 2.61, 0.1: 1.10 0.0: 0.02 (0-1, 1-0 after 4th rot until 5th compl)
 
 # move
 enable_move: false
